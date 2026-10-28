@@ -47,8 +47,9 @@ start_hud() {
   [[ -z ${SNAG_NO_HUD:-} ]] || return 0
   pgrep -qf "$hud_bin $items" && return 0
   build hud || return 0
-  nohup "$hud_bin" "$items" </dev/null >/dev/null 2>&1 &
-  disown
+  # New session, so Raycast ending the script's process group cannot take the pill with it.
+  /usr/bin/perl -MPOSIX -e 'fork and exit; POSIX::setsid(); exec @ARGV' \
+    "$hud_bin" "$items" </dev/null >/dev/null 2>&1
 }
 
 cmd_add() {
