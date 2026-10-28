@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# snag: collect screenshot + note pairs into one folder for a coding agent.
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+root=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+dir=${SNAG_DIR:-$HOME/Work/.snag}
+cur=$dir/current
+items=$cur/items.jsonl
+note_src=$root/src/note.swift
+note_bin=$root/build/snag-note
+
+# First line of the note, max 80 characters. Shared by `ls` and issues.md.
+jq_headline='def headline: (.note | split("\n")[0] // "") as $l
+  | if $l == "" then "(no note)" elif ($l | length) > 80 then $l[0:79] + "…" else $l end;'
+
+count() {
+  if [[ -s $items ]]; then wc -l <"$items" | tr -d ' '; else echo 0; fi
+}
+
+frontmost_app() {
+  osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || true
+}
+
+# Prints "URL<newline>title" of the active tab, or nothing when the app is not a known browser.
+browser_tab() {
+  local tab
+  case $1 in
+    "Google Chrome" | "Arc" | "Brave Browser" | "Microsoft Edge") tab="active tab of front window" ;;
+    "Safari") tab="current tab of front window" ;;
+    *) return 0 ;;
+  esac
+  osascript -e "tell application \"$1\" to get (URL of $tab) & linefeed & (name of $tab)" 2>/dev/null || true
+}
+
+build_note() {
+  [[ $note_bin -nt $note_src ]] && return 0
+  mkdir -p "$(dirname "$note_bin")"
+  swiftc -O "$note_src" -o "$note_bin" >&2 || { echo "Build of snag-note failed"; exit 1; }
+}
+
+cmd_add() {
+  local app tab url="" title="" tmp png note n img at
+  app=$(frontmost_app)
+  tab=$(browser_tab "$app")
+  if [[ -n $tab ]]; then
+    url=${tab%%$'\n'*}
+    title=${tab#*$'\n'}
+  fi
+
+  tmp=$(mktemp -d)
+  trap "rm -rf '$tmp'" EXIT
+  png=$tmp/shot.png
+  if [[ -n ${SNAG_IMAGE:-} ]]; then
+    cp "$SNAG_IMAGE" "$png"
+  else
+    screencapture -i -x "$png" || true
+  fi
+  [[ -s $png ]] || { echo "Cancelled"; return 0; }
+
+  if [[ -n ${SNAG_NOTE+set} ]]; then
+    note=$SNAG_NOTE
+  else
+    build_note
+    note=$("$note_bin" "$png") || { echo "Discarded"; return 0; }
+  fi
+
+  mkdir -p "$cur"
+  n=$(($(count) + 1))
+  img=$(printf '%02d.png' "$n")
+  at=$(date +%Y-%m-%dT%H:%M:%S%z | sed -E 's/([0-9]{2})$/:\1/')
+  mv "$png" "$cur/$img"
+  jq -nc --argjson n "$n" --arg image "$img" --arg note "$note" \
+    --arg app "$app" --arg url "$url" --arg title "$title" --arg at "$at" '
+    def nullable: if . == "" then null else . end;
+    {n: $n, image: $image, note: $note, app: ($app | nullable),
+     url: ($url | nullable), title: ($title | nullable), at: $at}' >>"$items"
+  echo "Snag #$n added"
+}
+
+cmd_undo() {
+  [[ $(count) -gt 0 ]] || { echo "No snags"; return 0; }
+  local last
+  last=$(tail -n 1 "$items")
+  sed -i '' '$d' "$items"
+  rm -f "$cur/$(jq -r .image <<<"$last")"
+  echo "Removed #$(jq -r .n <<<"$last")"
+}
+
+cmd_ls() {
+  local c
+  c=$(count)
+  echo "$c snag$([[ $c == 1 ]] || echo s)"
+  [[ $c -gt 0 ]] || return 0
+  jq -r "$jq_headline"' "\(.n). \(headline)"' "$items"
+}
+
+render() {
+  jq -rs --arg when "$(date '+%Y-%m-%d %H:%M')" "$jq_headline"'
+    "# Snag \($when)\n\n\(length) issue\(if length == 1 then "" else "s" end). Screenshots sit next to this file.\n",
+    (.[] |
+      "## \(.n). \(headline)\n",
+      "- App: \(.app // "unknown")",
+      (select(.url) | "- URL: \(.url)\(if .title then " (\"\(.title)\")" else "" end)"),
+      "- At: \(.at[11:19])\n",
+      (select(.note != "") | "\(.note)\n"),
+      "![\(.image | rtrimstr(".png"))](\(.image))\n")' "$items"
+}
+
+cmd_done() {
+  local c stamp dest i=2 copied=""
+  c=$(count)
+  [[ $c -gt 0 ]] || { echo "No snags"; return 0; }
+  render >"$cur/issues.md"
+  stamp=$(date +%Y-%m-%d-%H%M)
+  dest=$dir/$stamp
+  while [[ -e $dest ]]; do dest=$dir/$stamp-$((i++)); done
+  mv "$cur" "$dest"
+  ln -sfn "$dest" "$dir/latest"
+  printf %s "$dest" | pbcopy 2>/dev/null && copied=" (path copied)"
+  echo "$c snag$([[ $c == 1 ]] || echo s) → ${dest/#$HOME/~}$copied"
+}
+
+case ${1:-} in
+  add) cmd_add ;;
+  undo) cmd_undo ;;
+  ls) cmd_ls ;;
+  done) cmd_done ;;
+  *)
+    echo "usage: snag add|undo|ls|done" >&2
+    exit 2
+    ;;
+esac
