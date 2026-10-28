@@ -8,8 +8,8 @@ root=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
 dir=${SNAG_DIR:-$HOME/Work/.snag}
 cur=$dir/current
 items=$cur/items.jsonl
-note_src=$root/src/note.swift
 note_bin=$root/build/snag-note
+hud_bin=$root/build/snag-hud
 
 # First line of the note, max 80 characters. Shared by `ls` and issues.md.
 jq_headline='def headline: (.note | split("\n")[0] // "") as $l
@@ -34,10 +34,21 @@ browser_tab() {
   osascript -e "tell application \"$1\" to get (URL of $tab) & linefeed & (name of $tab)" 2>/dev/null || true
 }
 
-build_note() {
-  [[ $note_bin -nt $note_src ]] && return 0
-  mkdir -p "$(dirname "$note_bin")"
-  swiftc -O "$note_src" -o "$note_bin" >&2 || { echo "Build of snag-note failed"; exit 1; }
+# Compiles src/<name>.swift to build/snag-<name> when the source is newer.
+build() {
+  local src=$root/src/$1.swift bin=$root/build/snag-$1
+  [[ $bin -nt $src ]] && return 0
+  mkdir -p "$root/build"
+  swiftc -O "$src" -o "$bin" >&2 || { echo "Build of snag-$1 failed"; return 1; }
+}
+
+# One HUD per stack. It exits by itself when the stack is empty or finished.
+start_hud() {
+  [[ -z ${SNAG_NO_HUD:-} ]] || return 0
+  pgrep -qf "$hud_bin $items" && return 0
+  build hud || return 0
+  nohup "$hud_bin" "$items" </dev/null >/dev/null 2>&1 &
+  disown
 }
 
 cmd_add() {
@@ -62,7 +73,7 @@ cmd_add() {
   if [[ -n ${SNAG_NOTE+set} ]]; then
     note=$SNAG_NOTE
   else
-    build_note
+    build note || exit 1
     note=$("$note_bin" "$png") || { echo "Discarded"; return 0; }
   fi
 
@@ -76,6 +87,7 @@ cmd_add() {
     def nullable: if . == "" then null else . end;
     {n: $n, image: $image, note: $note, app: ($app | nullable),
      url: ($url | nullable), title: ($title | nullable), at: $at}' >>"$items"
+  start_hud
   echo "Snag #$n added"
 }
 
