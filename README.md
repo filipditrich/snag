@@ -8,7 +8,7 @@ Works in any app. In Chrome, Arc, Brave, Edge and Safari it also records the act
 
 Requirements: macOS, Xcode Command Line Tools (`swiftc`), `jq`.
 
-1. In Raycast, add `raycast/` as a Script Commands directory.
+1. In Raycast Settings, open Script Commands and add `raycast/` (not the repo root) under Script Folders with +.
 2. Give hotkeys to **Snag**, **Snag: Undo Last** and **Snag: Finish**.
 
 The note window (`src/note.swift`) builds itself into `build/` on first use and after every change to the source. The first time snag reads a browser tab, macOS asks to let Raycast control that browser.
