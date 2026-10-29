@@ -20,33 +20,41 @@ In Chrome, Arc, Brave, Edge and Safari, snag also records the active tab URL and
 
 ## Install
 
-Requirements: macOS, [Raycast](https://raycast.com), Xcode Command Line Tools (`swiftc`) and `jq`.
+You need macOS 15 or later, [Raycast](https://raycast.com) and the Xcode Command Line Tools (`xcode-select --install`). Setup takes about two minutes.
 
-```bash
-git clone git@github.com:filipditrich/snag.git ~/Work/tools/snag
-```
+1. Clone the repo anywhere and run setup:
 
-1. In Raycast Settings, open **Script Commands** and add the `raycast/` folder of the checkout (not the repo root) under **Script Folders** with **+**.
-2. Give **Snag** a hotkey, for example ⌃⌥S. **Snag: Undo Last** and **Snag: Finish** work from the launcher without one.
-3. Press the hotkey once. macOS asks for Screen Recording permission for Raycast. In a browser it also asks to let Raycast control that browser, which is how snag reads the tab.
+   ```bash
+   git clone https://github.com/filipditrich/snag.git ~/Tools/snag
+   ~/Tools/snag/bin/snag setup
+   ```
 
-The note window (`src/note.swift`) and the counter (`src/hud.swift`) build themselves into `build/` on first use and after every change to the source. The first snag therefore takes a few seconds.
+   Setup checks the requirements, builds the note window and the counter, and links `snag` into your PATH. Every line starts with ✓ or ✗; a ✗ line says how to fix it. Rerun it any time to check your install.
+
+2. Add the commands to Raycast. Setup copies the folder path for you.
+   1. Open Raycast Settings (⌘,) → **Extensions** → **+** → **Add Script Directory**.
+   2. Press ⌘⇧G, paste, and choose the `raycast` folder of the checkout.
+   3. Find **Snag** in the Extensions list and record a hotkey, for example ⌃⌥S.
+
+3. Press the hotkey once. macOS asks to allow **Screen Recording** for Raycast. Allow it and restart Raycast. In a browser, macOS also asks to let Raycast control that browser. Allow it too, so snag can read the tab URL.
 
 ## Using it
 
-1. **Snag.** Drag over a region (esc cancels). Type the issue. ⌘↵ adds it, esc discards it.
+1. **Snag** (your hotkey). Drag over a region; esc cancels. Type the issue. ⌘↵ adds it, esc discards it.
 2. **Snag: Undo Last** removes the last snag.
-3. **Snag: Finish** writes `issues.md` and copies the folder path. Paste it to the agent.
+3. **Snag: Finish** writes `issues.md` and copies the folder path. Paste it to your agent.
 
-The same commands work from a terminal:
+Undo and Finish work from the Raycast launcher without a hotkey. The same commands work in a terminal:
 
 ```console
-$ bin/snag ls
+$ snag ls
 2 snags
 1. Tlačítko „Uložit“ přetéká
 2. Table header is not sticky
-$ bin/snag done
-2 snags → ~/Work/.snag/2026-10-28-1530 (path copied)
+$ snag done
+2 snags → ~/.snag/2026-10-28-1530 (path copied)
+$ snag latest
+/Users/you/.snag/2026-10-28-1530
 ```
 
 An entry in `issues.md` looks like this:
@@ -66,13 +74,18 @@ On narrow screens it wraps under the table.
 
 ## Telling your agent
 
-Add a line like this to your agent instructions (`CLAUDE.md`, `AGENTS.md`):
+Add this to your agent instructions, for example `~/.claude/CLAUDE.md` or `AGENTS.md`:
 
-> When I paste a `~/Work/.snag/...` path or say "snags", read `issues.md` there, open each screenshot, and work the issues in order.
+> When I paste a snag folder path or say "snags", read `issues.md` in that folder (no path: run `snag latest`), open each screenshot, and work the issues in order.
+
+## Update and uninstall
+
+- Update: `snag update`. It pulls the latest version and rebuilds.
+- Uninstall: remove the script directory in Raycast, then delete the checkout, `~/.snag`, `~/.config/snag` and the `snag` link that setup printed.
 
 ## Files
 
-Everything lives in `~/Work/.snag`. Set `SNAG_DIR` to change it.
+Snags go to `~/.snag`. To change that, put `dir=<path>` in `~/.config/snag/config`. The `SNAG_DIR` environment variable overrides the file, but Raycast does not pass your shell environment, so use the file for everyday use.
 
 - `current/` is the open stack. `items.jsonl` holds one line per snag and is the only state.
 - `YYYY-MM-DD-HHMM/` is a finished stack with `issues.md`, `NN.png` and `items.jsonl`.
@@ -84,15 +97,25 @@ Everything lives in `~/Work/.snag`. Set `SNAG_DIR` to change it.
 
 The counter is a separate process that polls the line count of `items.jsonl` every half second and quits when the file is gone or empty. `add` starts it in its own session, so Raycast ending the script does not end the counter. `undo` and `done` never talk to it.
 
+The note window (`src/note.swift`) and the counter (`src/hud.swift`) are rebuilt into `build/` whenever their source changes.
+
+## Without Raycast
+
+Raycast is only the hotkey. Any launcher that runs a shell command works: bind `snag add`, `snag undo` and `snag done` in Shortcuts, Hammerspoon or skhd. macOS then asks for Screen Recording permission for that app instead of Raycast.
+
 ## Troubleshooting
 
-**The commands do not show up in Raycast.** The script folder must be `raycast/`, not the repo root. Run **Reload Script Commands** after adding it.
+Run `snag setup` first. It reports what is missing.
+
+**The commands do not show up in Raycast.** The script directory must be `raycast/`, not the repo root. Run **Reload Script Commands** after adding it.
 
 **The URL line is missing.** Raycast is not allowed to control that browser. Allow it in System Settings → Privacy & Security → Automation.
 
 **The screenshot is empty or shows only the wallpaper.** Raycast lacks Screen Recording permission. Allow it in System Settings → Privacy & Security → Screen Recording, then restart Raycast.
 
 **The app is recorded as Raycast.** You started Snag from the Raycast launcher. Use the hotkey to record the app you were in.
+
+**`snag: command not found`.** Setup found no writable folder on your PATH. Add the checkout's `bin` folder to PATH, or call `bin/snag` directly.
 
 ## Development
 
