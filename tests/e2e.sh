@@ -2,7 +2,7 @@
 set -euo pipefail
 snag=$(cd "$(dirname "$0")/.." && pwd)/bin/snag
 tmp=$(mktemp -d)
-export SNAG_DIR=$tmp/snag SNAG_NO_HUD=1
+export SNAG_DIR=$tmp/snag SNAG_NO_HUD=1 XDG_CONFIG_HOME=$tmp/config
 clip=$(pbpaste)
 trap 'printf %s "$clip" | pbcopy; rm -rf "$tmp"' EXIT
 
@@ -39,4 +39,13 @@ SNAG_IMAGE=$img SNAG_NOTE=again $snag add >/dev/null
 $snag done >/dev/null
 [[ $(readlink $SNAG_DIR/latest) == "$dest-2" ]] || fail "collision suffix"
 [[ $($snag ls) == "0 snags" ]] || fail "ls after done"
+[[ $($snag latest) == "$dest-2" ]] || fail "latest"
+
+mkdir -p $XDG_CONFIG_HOME/snag
+printf 'dir=%s\n' "$tmp/from-config" >$XDG_CONFIG_HOME/snag/config
+! env -u SNAG_DIR $snag latest 2>/dev/null || fail "latest with no finished stack"
+env -u SNAG_DIR SNAG_IMAGE=$img SNAG_NOTE=cfg $snag add >/dev/null
+env -u SNAG_DIR $snag done >/dev/null
+[[ $(env -u SNAG_DIR $snag latest) == "$tmp/from-config/"* ]] || fail "config dir= ignored"
+[[ $($snag latest) == "$dest-2" ]] || fail "SNAG_DIR does not win over config"
 echo ALL OK

@@ -2,10 +2,17 @@
 # snag: collect screenshot + note pairs into one folder for a coding agent.
 set -euo pipefail
 
+user_path=$PATH
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 root=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-dir=${SNAG_DIR:-$HOME/Work/.snag}
+config=${XDG_CONFIG_HOME:-$HOME/.config}/snag/config
+
+# SNAG_DIR wins over `dir=` in the config file. Raycast does not pass shell env, so the file is the durable setting.
+conf_dir=""
+[[ -f $config ]] && conf_dir=$(sed -n 's/^dir=//p' "$config" | tail -n 1)
+conf_dir=${conf_dir/#\~/$HOME}
+dir=${SNAG_DIR:-${conf_dir:-$HOME/.snag}}
 cur=$dir/current
 items=$cur/items.jsonl
 note_bin=$root/build/snag-note
@@ -135,13 +142,93 @@ cmd_done() {
   echo "$c snag$([[ $c == 1 ]] || echo s) → ${dest/#$HOME/~}$copied"
 }
 
+cmd_latest() {
+  [[ -L $dir/latest ]] || { echo "No finished snags in ${dir/#$HOME/~}" >&2; return 1; }
+  readlink "$dir/latest"
+}
+
+ok() { echo "✓ $*"; }
+bad() { echo "✗ $*"; failed=1; }
+
+# Puts `snag` on PATH: the first writable PATH dir among the usual ones, never over a foreign file.
+link_cli() {
+  local d
+  for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+    [[ :$user_path: == *:$d:* && -w $d ]] || continue
+    [[ ! -e $d/snag || -L $d/snag ]] || continue
+    ln -sfn "$root/bin/snag" "$d/snag"
+    echo "$d/snag"
+    return 0
+  done
+  return 1
+}
+
+# Idempotent: checks every requirement, builds the helpers and links the CLI. Safe to rerun as a doctor.
+cmd_setup() {
+  local failed=0 link scripts=$root/raycast
+  ok "macOS $(sw_vers -productVersion)"
+  if command -v swiftc >/dev/null; then
+    ok "swiftc"
+    if build note && build hud; then ok "Built the note window and the counter"; else bad "Build failed (see above)"; fi
+  else
+    bad "swiftc missing. Run: xcode-select --install"
+  fi
+  if command -v jq >/dev/null; then ok "jq"; else bad "jq missing (macOS 15+ ships it). Run: brew install jq"; fi
+  if link=$(link_cli); then
+    ok "snag command → ${link/#$HOME/~}"
+  else
+    echo "· snag command not linked. Add $root/bin to PATH to use it in a terminal"
+  fi
+  if [[ -d /Applications/Raycast.app || -d $HOME/Applications/Raycast.app ]]; then
+    ok "Raycast"
+  else
+    bad "Raycast missing. Install it from https://raycast.com"
+  fi
+  echo "· Snags go to ${dir/#$HOME/~} (change with dir=<path> in ${config/#$HOME/~})"
+  [[ $failed == 0 ]] || { echo; echo "Fix the ✗ lines, then run snag setup again."; return 1; }
+
+  printf %s "$scripts" | pbcopy 2>/dev/null || true
+  cat <<EOF
+
+Last step, in Raycast (the folder path is on your clipboard):
+1. Settings (⌘,) → Extensions → + → Add Script Directory.
+2. Press ⌘⇧G, paste, and choose: ${scripts/#$HOME/~}
+3. Search "Snag" in the Extensions list and record a hotkey, for example ⌃⌥S.
+4. Press the hotkey once and allow Screen Recording for Raycast. Restart Raycast after that.
+EOF
+}
+
+cmd_update() {
+  git -C "$root" pull --ff-only --quiet
+  build note && build hud
+  echo "snag is at $(git -C "$root" log -1 --format='%h %s')"
+}
+
+usage() {
+  cat <<'EOF'
+usage: snag <command>
+
+  add      screenshot a region and add a note to the open stack
+  undo     remove the last snag
+  ls       list the open stack
+  done     write issues.md, copy the folder path
+  latest   print the path of the last finished stack
+  setup    check requirements, build, link the CLI (rerun any time)
+  update   pull the latest version and rebuild
+EOF
+}
+
 case ${1:-} in
   add) cmd_add ;;
   undo) cmd_undo ;;
   ls) cmd_ls ;;
   done) cmd_done ;;
+  latest) cmd_latest ;;
+  setup) cmd_setup ;;
+  update) cmd_update ;;
+  -h | --help | help) usage ;;
   *)
-    echo "usage: snag add|undo|ls|done" >&2
+    usage >&2
     exit 2
     ;;
 esac
